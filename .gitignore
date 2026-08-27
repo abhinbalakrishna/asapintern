@@ -1,0 +1,15 @@
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.db
+.secret_key
+.env
+
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+.DS_Store
+Thumbs.db
