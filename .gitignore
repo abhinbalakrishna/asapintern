@@ -5,6 +5,7 @@ __pycache__/
 *.db
 .secret_key
 .env
+server.log
 
 node_modules/
 dist/
