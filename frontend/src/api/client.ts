@@ -101,9 +101,10 @@ export async function getSession(sessionId: number) {
   return data;
 }
 
-export async function analyzeFrame(blob: Blob) {
+export async function analyzeFrame(blob: Blob, sessionId: number) {
   const form = new FormData();
   form.append("frame", blob, "frame.jpg");
+  form.append("session_id", String(sessionId));
   const { data } = await api.post<FrameAnalysis>("/attention/analyze", form, {
     headers: { "Content-Type": "multipart/form-data" },
   });

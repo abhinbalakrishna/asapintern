@@ -21,6 +21,7 @@ function statusColor(status: string) {
   if (status === "Focused") return "text-emerald-500";
   if (status === "No face detected") return "text-slate-400";
   if (status === "Eyes closed / drowsy") return "text-red-500";
+  if (status.startsWith("Calibrating")) return "text-sky-500";
   return "text-amber-500";
 }
 
@@ -68,9 +69,10 @@ export function Dashboard() {
       async (blob) => {
         if (!blob || !sessionIdRef.current) return;
         try {
-          const result = await analyzeFrame(blob);
+          const result = await analyzeFrame(blob, sessionIdRef.current);
           setCurrentScore(result.score);
           setCurrentStatus(result.status);
+          if (result.status.startsWith("Calibrating")) return;
           setPoints((prev) => [...prev.slice(-29), { t: Date.now(), score: result.score }]);
           await addReading(sessionIdRef.current, {
             score: result.score,

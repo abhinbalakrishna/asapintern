@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session, joinedload
 from .. import models, schemas
 from ..auth import get_current_user
 from ..database import get_db
+from .attention import clear_calibration
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
@@ -77,6 +78,7 @@ def end_session(
     )
     db.commit()
     db.refresh(session)
+    clear_calibration(session.id)
     return session
 
 

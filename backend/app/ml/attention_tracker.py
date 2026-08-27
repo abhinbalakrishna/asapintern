@@ -3,8 +3,15 @@ Webcam-frame attention scoring.
 
 Pipeline: MediaPipe FaceMesh (pretrained) locates facial landmarks -> a
 solvePnP head-pose estimate gives yaw/pitch -> eye-aspect-ratio (EAR) on
-the eye landmarks detects closed eyes. These are combined into a single
-0-100 "attention score" plus a human-readable status.
+the eye landmarks detects closed eyes.
+
+The generic 3D face model and the focal-length approximation used here
+only give a rough yaw/pitch estimate: the absolute numbers carry a
+per-person, per-camera bias (different face shape, camera placement,
+etc.), so "0 degrees" from solvePnP does not reliably mean "looking at
+the screen". Callers should calibrate by averaging a few frames of the
+user looking at the screen and comparing later readings against that
+baseline instead of against zero -- see routers/attention.py.
 """
 
 import threading
@@ -52,8 +59,8 @@ _LEFT_EYE = [33, 160, 158, 133, 153, 144]
 _RIGHT_EYE = [362, 385, 387, 263, 373, 380]
 
 _EAR_THRESHOLD = 0.21
-_YAW_OK_DEG = 22.0
-_PITCH_OK_DEG = 18.0
+_YAW_OK_DEG = 15.0
+_PITCH_OK_DEG = 13.0
 
 
 def _eye_aspect_ratio(landmarks, idx, w, h):
@@ -80,7 +87,8 @@ def _rotation_matrix_to_euler(rmat):
     return np.degrees(pitch), np.degrees(yaw), np.degrees(roll)
 
 
-def analyze_frame(image_bgr: np.ndarray) -> dict:
+def extract_pose(image_bgr: np.ndarray) -> dict:
+    """Runs FaceMesh + solvePnP and returns raw, uncalibrated pose features."""
     h, w = image_bgr.shape[:2]
     image_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
 
@@ -88,14 +96,7 @@ def analyze_frame(image_bgr: np.ndarray) -> dict:
         result = _face_mesh.process(image_rgb)
 
     if not result.multi_face_landmarks:
-        return {
-            "score": 0.0,
-            "status": "No face detected",
-            "yaw": None,
-            "pitch": None,
-            "eyes_closed": False,
-            "face_detected": False,
-        }
+        return {"face_detected": False, "yaw": None, "pitch": None, "eyes_closed": False}
 
     landmarks = result.multi_face_landmarks[0].landmark
 
@@ -133,23 +134,27 @@ def analyze_frame(image_bgr: np.ndarray) -> dict:
     avg_ear = (left_ear + right_ear) / 2.0
     eyes_closed = avg_ear < _EAR_THRESHOLD
 
-    if eyes_closed:
-        score = 15.0
-        status = "Eyes closed / drowsy"
-    elif yaw is None:
-        score = 50.0
-        status = "Face detected"
-    else:
-        yaw_penalty = max(0.0, abs(yaw) - _YAW_OK_DEG) * 2.2
-        pitch_penalty = max(0.0, abs(pitch) - _PITCH_OK_DEG) * 2.2
-        score = max(0.0, 100.0 - yaw_penalty - pitch_penalty)
-        status = "Focused" if score >= 70 else "Looking away"
-
     return {
-        "score": round(float(score), 1),
-        "status": status,
-        "yaw": round(float(yaw), 1) if yaw is not None else None,
-        "pitch": round(float(pitch), 1) if pitch is not None else None,
-        "eyes_closed": bool(eyes_closed),
         "face_detected": True,
+        "yaw": float(yaw) if yaw is not None else None,
+        "pitch": float(pitch) if pitch is not None else None,
+        "eyes_closed": bool(eyes_closed),
     }
+
+
+def score_pose(yaw: float | None, pitch: float | None, eyes_closed: bool, face_detected: bool) -> dict:
+    """Turns (baseline-adjusted) yaw/pitch into a 0-100 score + status."""
+    if not face_detected:
+        return {"score": 0.0, "status": "No face detected"}
+
+    if eyes_closed:
+        return {"score": 15.0, "status": "Eyes closed / drowsy"}
+
+    if yaw is None or pitch is None:
+        return {"score": 50.0, "status": "Face detected"}
+
+    yaw_penalty = max(0.0, abs(yaw) - _YAW_OK_DEG) * 2.2
+    pitch_penalty = max(0.0, abs(pitch) - _PITCH_OK_DEG) * 2.2
+    score = max(0.0, 100.0 - yaw_penalty - pitch_penalty)
+    status = "Focused" if score >= 70 else "Looking away"
+    return {"score": round(float(score), 1), "status": status}
